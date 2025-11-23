@@ -10,11 +10,8 @@ from selenium.webdriver.chrome.service import Service
 import pandas as pd
 import time
 import re
-import os
 import json
 from typing import List, Dict
-import glob
-import stat
 
 class TMDBSuccessfulScraper:
     def __init__(self, api_key: str, headless: bool = False):
@@ -22,186 +19,32 @@ class TMDBSuccessfulScraper:
         self.base_url = "https://www.themoviedb.org"
         self.api_base_url = "https://api.themoviedb.org/3"
         self.setup_driver(headless)
-    
-    def _is_binary_executable(self, path: str) -> bool:
-        """Return True if path is an executable binary (executable bit or ELF header)."""
-        try:
-            if not os.path.isfile(path):
-                return False
-            # executable bit
-            if os.access(path, os.X_OK):
-                return True
-            # quick ELF header check for Linux
-            with open(path, 'rb') as fh:
-                header = fh.read(4)
-                if header == b'\x7fELF':
-                    return True
-            # Windows exe fallback
-            if path.lower().endswith('.exe'):
-                return True
-            return False
-        except Exception:
-            return False
-
-    def _resolve_chromedriver_executable(self, installed_path: str) -> str:
-        """
-        Given the path returned by ChromeDriverManager().install(), locate the real chromedriver binary.
-        Strategy:
-         - If installed_path already looks executable -> use it.
-         - Search the installed_path directory and up to several parents.
-         - Search the standard webdriver-manager folder (~/.wdm/drivers/chromedriver) recursively.
-         - If still not found, try chromedriver_autoinstaller.install() as a fallback.
-         - If nothing found, return installed_path so the failure is visible in logs.
-        """
-        try:
-            if self._is_binary_executable(installed_path):
-                return installed_path
-        except Exception:
-            pass
-
-        search_dirs = []
-        base_dir = os.path.dirname(installed_path) or installed_path
-        search_dirs.append(base_dir)
-
-        # add up to 4 parent directories
-        p = base_dir
-        for _ in range(4):
-            p = os.path.dirname(p)
-            if p and p not in search_dirs:
-                search_dirs.append(p)
-
-        # add the webdriver-manager drivers chromedriver dir
-        try:
-            wdm_root = os.path.join(os.path.expanduser("~"), ".wdm", "drivers", "chromedriver")
-            if os.path.isdir(wdm_root) and wdm_root not in search_dirs:
-                search_dirs.append(wdm_root)
-        except Exception:
-            pass
-
-        # search for candidates
-        candidates = []
-        for d in search_dirs:
-            try:
-                for root, _, files in os.walk(d):
-                    for f in files:
-                        if 'chromedriver' in f.lower():
-                            candidates.append(os.path.join(root, f))
-            except Exception:
-                continue
-
-        # dedupe while preserving order
-        seen = set()
-        candidates_filtered = []
-        for c in candidates:
-            if c not in seen:
-                seen.add(c)
-                candidates_filtered.append(c)
-
-        for cand in candidates_filtered:
-            if self._is_binary_executable(cand):
-                try:
-                    os.chmod(cand, 0o755)
-                except Exception:
-                    pass
-                return cand
-
-        # fallback: try chromedriver_autoinstaller if available (use dynamic import to avoid unresolved import errors)
-        try:
-            import importlib
-            # check for the package without importing it directly to satisfy linters/environments where it's absent
-            if importlib.util.find_spec("chromedriver_autoinstaller") is not None:
-                chromedriver_autoinstaller = importlib.import_module("chromedriver_autoinstaller")
-                print("chromedriver_autoinstaller available — attempting install() fallback")
-                auto_path = chromedriver_autoinstaller.install()
-                if auto_path and self._is_binary_executable(auto_path):
-                    try:
-                        os.chmod(auto_path, 0o755)
-                    except Exception:
-                        pass
-                    return auto_path
-        except Exception as e:
-            print(f"chromedriver_autoinstaller not usable or install failed: {e}")
-
-        # Debugging aid: print top-level contents of webdriver-manager driver folder
-        try:
-            debug_dir = os.path.dirname(installed_path) or installed_path
-            print(f"DEBUG - listing directory where webdriver-manager returned path: {debug_dir}")
-            for entry in sorted(os.listdir(debug_dir)):
-                try:
-                    ent_path = os.path.join(debug_dir, entry)
-                    print("  ", entry, "-" , "exe" if os.access(ent_path, os.X_OK) else "noexe", os.path.getsize(ent_path) if os.path.isfile(ent_path) else "")
-                except Exception:
-                    print("  ", entry)
-        except Exception:
-            pass
-
-        # nothing usable found
-        return installed_path
 
     def setup_driver(self, headless: bool = False):
         """Setup Chrome driver with options"""
         chrome_options = Options()
         if headless:
-            chrome_options.add_argument("--headless=new")
+            chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--window-size=1920,1080")
-
-        installed = ChromeDriverManager().install()
-        resolved = self._resolve_chromedriver_executable(installed)
-        print(f"ChromeDriverManager.install() returned: {installed}")
-        print(f"Resolved chromedriver executable: {resolved}")
-
-        # If resolution still points at THIRD_PARTY_NOTICES or a non-executable, print extra debug and raise a clear error
-        if 'THIRD_PARTY_NOTICES' in os.path.basename(resolved) or not self._is_binary_executable(resolved):
-            # list the whole chromedriver drivers folder for debugging
-            try:
-                wdm_dir = os.path.join(os.path.expanduser("~"), ".wdm", "drivers", "chromedriver")
-                print("DEBUG - listing ~/.wdm/drivers/chromedriver (first 200 entries):")
-                for root, dirs, files in os.walk(wdm_dir):
-                    print("DIR:", root)
-                    for f in files[:200]:
-                        p = os.path.join(root, f)
-                        try:
-                            print("  ", f, "-", "exe" if os.access(p, os.X_OK) else "noexe", os.path.getsize(p) if os.path.isfile(p) else "")
-                        except Exception:
-                            print("  ", f)
-                    # only top-level listing is usually enough
-                    break
-            except Exception as e:
-                print("DEBUG listing failed:", e)
-
-            raise RuntimeError(
-                "Failed to resolve a valid chromedriver binary. "
-                "webdriver-manager returned a non-executable file. "
-                "Ensure google-chrome/chromium is installed on the runner, upgrade webdriver-manager, "
-                "or add chromedriver to PATH. See CI logs above for folder listing."
-            )
-
-        service = Service(resolved)
+        
+        service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
-
-        try:
-            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        except Exception:
-            pass
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         self.wait = WebDriverWait(self.driver, 15)
-    
+
     def get_all_movies_via_pagination(self, category: str, max_pages: int = 20) -> List[str]:
         """Get ALL movies using working pagination approach"""
         movie_links = set()
-        
         print(f"Getting ALL movies from {category} via pagination")
         
         url_patterns = {
             "popular": f"{self.base_url}/movie?page={{}}",
-            "now-playing": f"{self.base_url}/movie/now-playing?page={{}}", 
+            "now-playing": f"{self.base_url}/movie/now-playing?page={{}}",
             "upcoming": f"{self.base_url}/movie/upcoming?page={{}}",
             "top-rated": f"{self.base_url}/movie/top-rated?page={{}}"
         }
@@ -233,7 +76,7 @@ class TMDBSuccessfulScraper:
                 if new_movies == 0:
                     print(f"No new movies on page {page} - reached end of content")
                     break
-                
+                    
                 print(f"Page {page}: +{new_movies} new movies, total: {len(movie_links)}")
                 
                 if new_movies < 5 and page > 3:
@@ -246,14 +89,12 @@ class TMDBSuccessfulScraper:
         
         print(f"Collected {len(movie_links)} total movies from {category}")
         return list(movie_links)
-    
+
     def _collect_movie_links(self) -> List[str]:
         """Collect all valid movie links from current page"""
         movie_links = set()
-        
         try:
             movie_elements = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/movie/']")
-            
             for element in movie_elements:
                 try:
                     href = element.get_attribute('href')
@@ -261,31 +102,30 @@ class TMDBSuccessfulScraper:
                         movie_links.add(href)
                 except StaleElementReferenceException:
                     continue
-                
         except Exception as e:
             print(f"Error collecting links: {e}")
         
         return list(movie_links)
-    
+
     def _is_valid_movie_link(self, href: str) -> bool:
         """Check if href is a valid movie link"""
         if not href:
             return False
-        
+            
         if any(x in href for x in ['/cast', '/crew', '/trailers', '/images', '/videos', '/reviews']):
             return False
-        
+            
         movie_id_match = re.search(r'/movie/(\d+)-', href)
         if not movie_id_match:
             return False
-        
+            
         return True
-    
+
     def get_movie_id_from_url(self, movie_url: str) -> str:
         """Extract movie ID from URL"""
         movie_id_match = re.search(r'/movie/(\d+)', movie_url)
         return movie_id_match.group(1) if movie_id_match else None
-    
+
     def get_complete_movie_data_from_api(self, movie_id: str) -> Dict:
         """Get COMPLETE movie data from TMDB API"""
         try:
@@ -294,7 +134,6 @@ class TMDBSuccessfulScraper:
                 "api_key": self.api_key,
                 "append_to_response": "credits,keywords,release_dates"
             }
-            
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "accept": "application/json"
@@ -344,7 +183,6 @@ class TMDBSuccessfulScraper:
                 complete_data['crew'] = important_crew[:10]
                 
                 return complete_data
-                
             else:
                 print(f"API error for movie {movie_id}: {response.status_code}")
                 return None
@@ -352,12 +190,12 @@ class TMDBSuccessfulScraper:
         except Exception as e:
             print(f"API extraction error for movie {movie_id}: {e}")
             return None
-    
+
     def scrape_all_categories_complete(self, pages_per_category: int = 20) -> pd.DataFrame:
         """Scrape ALL movies from all categories using pagination"""
         categories = {
             "popular": "Popular Movies",
-            "now-playing": "Now Playing", 
+            "now-playing": "Now Playing",
             "upcoming": "Upcoming",
             "top-rated": "Top Rated"
         }
@@ -377,9 +215,8 @@ class TMDBSuccessfulScraper:
             print(f"Found {len(movie_links)} movie links in {category_name}")
             
             successful_count = 0
-            
             for i, movie_link in enumerate(movie_links, 1):
-                print(f"  [{i}/{len(movie_links)}] Processing...")
+                print(f" [{i}/{len(movie_links)}] Processing...")
                 
                 movie_id = self.get_movie_id_from_url(movie_link)
                 if movie_id:
@@ -389,21 +226,18 @@ class TMDBSuccessfulScraper:
                         movie_data['source_url'] = movie_link
                         all_movies_data.append(movie_data)
                         successful_count += 1
-                        print(f"     Added: {movie_data['title']}")
+                        print(f" Added: {movie_data['title']}")
                     else:
-                        print(f"     Failed to get API data")
+                        print(f" Failed to get API data")
                 else:
-                    print(f"     Invalid movie URL")
+                    print(f" Invalid movie URL")
                 
                 if i % 10 == 0:
                     time.sleep(1)
             
             print(f"Successfully processed {successful_count}/{len(movie_links)} movies from {category_name}")
         
-        try:
-            self.driver.quit()
-        except Exception:
-            pass
+        self.driver.quit()
         
         if all_movies_data:
             df = pd.DataFrame(all_movies_data)
@@ -414,8 +248,7 @@ class TMDBSuccessfulScraper:
 
 def main():
     """Main function for successful pagination scraping"""
-
-    API_KEY = os.getenv('TMDB_API_KEY', "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI3YmI0MmUyYTc5YWYyNDA1MzU3MDhkODk3MDk0YTBjYSIsIm5iZiI6MTc2Mzc2NDg2NS4xNTI5OTk5LCJzdWIiOiI2OTIwZWE4MTM5YmEwOTMwYjA1ZDY1YWYiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.BvjwivRMjFRHXNu_iEQ8BgyEq5wxoDXQefpLXNDirFU")
+    API_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI3YmI0MmUyYTc5YWYyNDA1MzU3MDhkODk3MDk0YTBjYSIsIm5iZiI6MTc2Mzc2NDg2NS4xNTI5OTk5LCJzdWIiOiI2OTIwZWE4MTM5YmEwOTMwYjA1ZDY1YWYiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.BvjwivRMjFRHXNu_iEQ8BgyEq5wxoDXQefpLXNDirFU"
     
     print("Starting TMDB SUCCESSFUL Web Scraping")
     print("Using WORKING pagination approach")
@@ -423,22 +256,17 @@ def main():
     print("Expected: 200-1000+ movies across all categories")
     print("This will get you ALL the movies...")
     
-    # if running on CI, set headless True via env var CI or HEADLESS
-    headless_env = os.getenv('HEADLESS')
-    ci_env = os.getenv('CI')
-    headless_flag = True if headless_env == '1' or headless_env == 'true' or ci_env else False
-
-    scraper = TMDBSuccessfulScraper(api_key=API_KEY, headless=headless_flag)
-    
+    scraper = TMDBSuccessfulScraper(api_key=API_KEY, headless=False)
     start_time = time.time()
+    
     df = scraper.scrape_all_categories_complete(pages_per_category=20)
+    
     end_time = time.time()
     execution_time = end_time - start_time
     execution_minutes = execution_time / 60
     
     if not df.empty:
-        output_file = "data/tmdb_movies.csv"  
-        os.makedirs('data', exist_ok=True)  
+        output_file = "tmdb_complete_large_dataset.csv"
         df.to_csv(output_file, index=False, encoding='utf-8')
         
         print(f"\n{'='*70}")
@@ -451,11 +279,11 @@ def main():
         print(f"\nCATEGORY BREAKDOWN:")
         for category in df['category'].unique():
             count = len(df[df['category'] == category])
-            print(f"   {category}: {count} movies")
-        
+            print(f" {category}: {count} movies")
+            
         print(f"\nCOMPLETE DATA QUALITY:")
         fields_to_check = [
-            'budget', 'revenue', 'cast', 'director', 'keywords',
+            'budget', 'revenue', 'cast', 'director', 'keywords', 
             'production_companies', 'release_date', 'runtime', 'vote_average'
         ]
         
@@ -465,18 +293,17 @@ def main():
                     count = df[field].apply(lambda x: len(x) if x and x != 'N/A' and x != [] else 0).gt(0).sum()
                 else:
                     count = df[field].apply(lambda x: x not in ['N/A', None, ''] and x != 0).sum()
-                print(f"   {field.replace('_', ' ').title()}: {count}/{len(df)} movies")
+                print(f" {field.replace('_', ' ').title()}: {count}/{len(df)} movies")
         
         print("-" * 100)
         sample = df.head(3)
         for idx, row in sample.iterrows():
             print(f"{row['title']} ({row.get('release_date', 'N/A')})")
-            print(f"   {row['category']} | {row.get('vote_average', 'N/A')} | {row.get('runtime', 'N/A')}min")
-            print(f"   Budget: ${row.get('budget', 'N/A'):,} | Revenue: ${row.get('revenue', 'N/A'):,}")
-            print(f"   Genres: {', '.join(row['genres']) if row.get('genres') else 'N/A'}")
-            print(f"   Director: {', '.join(row['director']) if row.get('director') else 'N/A'}")
+            print(f" {row['category']} | {row.get('vote_average', 'N/A')} | {row.get('runtime', 'N/A')}min")
+            print(f" Budget: ${row.get('budget', 'N/A'):,} | Revenue: ${row.get('revenue', 'N/A'):,}")
+            print(f" Genres: {', '.join(row['genres']) if row.get('genres') else 'N/A'}")
+            print(f" Director: {', '.join(row['director']) if row.get('director') else 'N/A'}")
             print()
-        
     else:
         print("No data was collected!")
 
