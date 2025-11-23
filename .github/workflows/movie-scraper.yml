@@ -33,7 +33,7 @@ jobs:
           sudo apt-get install -y google-chrome-stable
           # Install Python dependencies
           pip install -r requirements.txt
-          
+
       - name: Create directories
         run: |
           mkdir -p data
@@ -75,4 +75,15 @@ jobs:
           git add data/
           git diff --staged --quiet || git commit -m "Automated: Updated movie data $(date +'%Y-%m-%d %H:%M')"
           git push
+          
+      - name: Install Chrome and dependencies
+        run: |
+          sudo apt-get update
+          # Install Chrome dependencies
+          sudo apt-get install -y wget unzip libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libxss1 libasound2
+          # Download and install Chrome
+          wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt install -y /tmp/chrome.deb
+          # Verify installation
+          google-chrome --version
 
