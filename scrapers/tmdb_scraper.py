@@ -28,42 +28,76 @@ class TMDBSuccessfulScraper:
         try:
             if not os.path.isfile(path):
                 return False
+            # executable bit
             if os.access(path, os.X_OK):
                 return True
             # quick ELF header check for Linux
             with open(path, 'rb') as fh:
                 header = fh.read(4)
-                return header == b'\x7fELF'
+                if header == b'\x7fELF':
+                    return True
+            # Windows exe fallback
+            if path.lower().endswith('.exe'):
+                return True
+            return False
         except Exception:
             return False
 
     def _resolve_chromedriver_executable(self, installed_path: str) -> str:
         """
-        Ensure installed_path points to an executable chromedriver binary.
-        If not, search the same directory (and subdirs) for the real executable,
-        set chmod +x and return it.
+        Given the path returned by ChromeDriverManager().install(), locate the real chromedriver binary.
+        Strategy:
+         - If installed_path already looks executable -> use it.
+         - Search the installed_path directory and up to several parents.
+         - Search the standard webdriver-manager folder (~/.wdm/drivers/chromedriver) recursively.
+         - If still not found, try chromedriver_autoinstaller.install() as a fallback.
+         - If nothing found, return installed_path so the failure is visible in logs.
         """
         try:
-            # If the path returned is already an executable binary, use it
             if self._is_binary_executable(installed_path):
                 return installed_path
         except Exception:
             pass
 
-        driver_dir = os.path.dirname(installed_path) or installed_path
+        search_dirs = []
+        base_dir = os.path.dirname(installed_path) or installed_path
+        search_dirs.append(base_dir)
 
-        # First pass: candidates in same dir
-        candidates = []
+        # add up to 4 parent directories
+        p = base_dir
+        for _ in range(4):
+            p = os.path.dirname(p)
+            if p and p not in search_dirs:
+                search_dirs.append(p)
+
+        # add the webdriver-manager drivers chromedriver dir
         try:
-            for p in glob.glob(os.path.join(driver_dir, '*')):
-                name = os.path.basename(p).lower()
-                if 'chromedriver' in name:
-                    candidates.append(p)
+            wdm_root = os.path.join(os.path.expanduser("~"), ".wdm", "drivers", "chromedriver")
+            if os.path.isdir(wdm_root) and wdm_root not in search_dirs:
+                search_dirs.append(wdm_root)
         except Exception:
-            candidates = []
+            pass
 
-        # Check candidates for executable/ELF
-        for cand in sorted(candidates):
+        # search for candidates
+        candidates = []
+        for d in search_dirs:
+            try:
+                for root, _, files in os.walk(d):
+                    for f in files:
+                        if 'chromedriver' in f.lower():
+                            candidates.append(os.path.join(root, f))
+            except Exception:
+                continue
+
+        # dedupe while preserving order
+        seen = set()
+        candidates_filtered = []
+        for c in candidates:
+            if c not in seen:
+                seen.add(c)
+                candidates_filtered.append(c)
+
+        for cand in candidates_filtered:
             if self._is_binary_executable(cand):
                 try:
                     os.chmod(cand, 0o755)
@@ -71,26 +105,43 @@ class TMDBSuccessfulScraper:
                     pass
                 return cand
 
-        # Second pass: walk subdirectories looking for chromedriver file
-        for root, _, files in os.walk(driver_dir):
-            for f in files:
-                if 'chromedriver' in f.lower():
-                    p = os.path.join(root, f)
-                    if self._is_binary_executable(p):
-                        try:
-                            os.chmod(p, 0o755)
-                        except Exception:
-                            pass
-                        return p
+        # fallback: try chromedriver_autoinstaller if available (use dynamic import to avoid unresolved import errors)
+        try:
+            import importlib
+            # check for the package without importing it directly to satisfy linters/environments where it's absent
+            if importlib.util.find_spec("chromedriver_autoinstaller") is not None:
+                chromedriver_autoinstaller = importlib.import_module("chromedriver_autoinstaller")
+                print("chromedriver_autoinstaller available — attempting install() fallback")
+                auto_path = chromedriver_autoinstaller.install()
+                if auto_path and self._is_binary_executable(auto_path):
+                    try:
+                        os.chmod(auto_path, 0o755)
+                    except Exception:
+                        pass
+                    return auto_path
+        except Exception as e:
+            print(f"chromedriver_autoinstaller not usable or install failed: {e}")
 
-        # Nothing found - return original so the error is visible
+        # Debugging aid: print top-level contents of webdriver-manager driver folder
+        try:
+            debug_dir = os.path.dirname(installed_path) or installed_path
+            print(f"DEBUG - listing directory where webdriver-manager returned path: {debug_dir}")
+            for entry in sorted(os.listdir(debug_dir)):
+                try:
+                    ent_path = os.path.join(debug_dir, entry)
+                    print("  ", entry, "-" , "exe" if os.access(ent_path, os.X_OK) else "noexe", os.path.getsize(ent_path) if os.path.isfile(ent_path) else "")
+                except Exception:
+                    print("  ", entry)
+        except Exception:
+            pass
+
+        # nothing usable found
         return installed_path
 
     def setup_driver(self, headless: bool = False):
         """Setup Chrome driver with options"""
         chrome_options = Options()
         if headless:
-            # use modern headless flag
             chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
@@ -99,16 +150,43 @@ class TMDBSuccessfulScraper:
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         chrome_options.add_argument("--disable-gpu")
-        
-        # Install and resolve the correct chromedriver executable
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--window-size=1920,1080")
+
         installed = ChromeDriverManager().install()
         resolved = self._resolve_chromedriver_executable(installed)
         print(f"ChromeDriverManager.install() returned: {installed}")
-        print(f"Using chromedriver executable: {resolved}")
+        print(f"Resolved chromedriver executable: {resolved}")
+
+        # If resolution still points at THIRD_PARTY_NOTICES or a non-executable, print extra debug and raise a clear error
+        if 'THIRD_PARTY_NOTICES' in os.path.basename(resolved) or not self._is_binary_executable(resolved):
+            # list the whole chromedriver drivers folder for debugging
+            try:
+                wdm_dir = os.path.join(os.path.expanduser("~"), ".wdm", "drivers", "chromedriver")
+                print("DEBUG - listing ~/.wdm/drivers/chromedriver (first 200 entries):")
+                for root, dirs, files in os.walk(wdm_dir):
+                    print("DIR:", root)
+                    for f in files[:200]:
+                        p = os.path.join(root, f)
+                        try:
+                            print("  ", f, "-", "exe" if os.access(p, os.X_OK) else "noexe", os.path.getsize(p) if os.path.isfile(p) else "")
+                        except Exception:
+                            print("  ", f)
+                    # only top-level listing is usually enough
+                    break
+            except Exception as e:
+                print("DEBUG listing failed:", e)
+
+            raise RuntimeError(
+                "Failed to resolve a valid chromedriver binary. "
+                "webdriver-manager returned a non-executable file. "
+                "Ensure google-chrome/chromium is installed on the runner, upgrade webdriver-manager, "
+                "or add chromedriver to PATH. See CI logs above for folder listing."
+            )
 
         service = Service(resolved)
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        # mask webdriver
+
         try:
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         except Exception:
