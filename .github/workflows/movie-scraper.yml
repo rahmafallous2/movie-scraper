@@ -1,8 +1,8 @@
-name: Movie Data Scraper (TESTING - Every Minute)
+name: Movie Data Scraper (Every 8 Hours)
 
 on:
   schedule:
-    - cron: '*/1 * * * *'
+    - cron: '0 */8 * * *'
   workflow_dispatch:
 
 jobs:
@@ -29,7 +29,6 @@ jobs:
 
       - name: Run scraper (only if an entrypoint exists)
         run: |
-          # Try common entrypoints; if none exist, print a message and succeed
           if [ -f "./main.py" ]; then
             python main.py
           elif [ -f "./scraper.py" ]; then

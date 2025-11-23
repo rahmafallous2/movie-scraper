@@ -741,13 +741,13 @@ class IMDbGenreFinder:
                     df[field] = ""
             
             df = df[required_fields]
-            df.to_csv('data/imdb_movies.csv', index=False)
+            df.to_csv('movie-scraper/imdb_movies.csv', index=False)
             logger.info(f"COMPLETE: Saved {len(movies_data)} movies to data/imdb_movies.csv")
             
             print("MASSIVE DATA COLLECTION SUMMARY:")
             print(f"TOTAL MOVIES: {len(movies_data)}")
             print(f"GENRES COLLECTED: Sample - {movies_data[0]['genres'] if movies_data else 'None'}")
-            print(f"SAVED TO: imdb_movies_MASSIVE_final.csv")
+            print(f"SAVED TO: movie-scraper/imdb_movies_MASSIVE_final.csv")
 
 def main():
     scraper = IMDbGenreFinder()

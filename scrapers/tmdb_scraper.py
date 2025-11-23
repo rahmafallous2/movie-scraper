@@ -266,7 +266,7 @@ def main():
     execution_minutes = execution_time / 60
     
     if not df.empty:
-        output_file = "tmdb_complete_large_dataset.csv"
+        output_file = "movie-scraper/tmdb_complete_large_dataset.csv"
         df.to_csv(output_file, index=False, encoding='utf-8')
         
         print(f"\n{'='*70}")
