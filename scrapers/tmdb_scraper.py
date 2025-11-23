@@ -30,6 +30,7 @@ class TMDBSuccessfulScraper:
                 return False
             if os.access(path, os.X_OK):
                 return True
+            # quick ELF header check for Linux
             with open(path, 'rb') as fh:
                 header = fh.read(4)
                 return header == b'\x7fELF'
