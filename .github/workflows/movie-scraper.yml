@@ -25,11 +25,20 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
+          sudo apt-get install -y wget unzip
+          # Install Chrome
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          # Install Python dependencies
           pip install -r requirements.txt
-
-      - name: Create data directory
-        run: mkdir -p data
+          
+      - name: Create directories
+        run: |
+          mkdir -p data
+          mkdir -p scrapers
+          mkdir -p scripts
 
       - name: Run TMDB Scraper
         env:
@@ -66,3 +75,4 @@ jobs:
           git add data/
           git diff --staged --quiet || git commit -m "Automated: Updated movie data $(date +'%Y-%m-%d %H:%M')"
           git push
+
