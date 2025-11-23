@@ -1,5 +1,5 @@
 
-const DATA_URL = "https://raw.githubusercontent.com/rahmafallous2/movie-scraper/main/data/combined_movies.csv";
+const DATA_URL = "https://raw.githubusercontent.com/rahmafallous2/movie-scraper/main/tmdb_complete_large_dataset.csv & https://raw.githubusercontent.com/rahmafallous2/movie-scraper/main/imdb_movies_MASSIVE_final.csv";
 
 let allMovies = [];
 let currentPage = 1;
