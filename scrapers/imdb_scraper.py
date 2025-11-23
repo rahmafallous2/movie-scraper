@@ -13,7 +13,6 @@ import json
 from urllib.parse import quote, urljoin
 import logging
 
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -28,9 +27,7 @@ class IMDbGenreFinder:
         self.movies_scraped = 0
         
     def setup_driver(self):
-        """Setup Selenium WebDriver"""
         chrome_options = Options()
-        # chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -46,11 +43,9 @@ class IMDbGenreFinder:
             self.driver.quit()
 
     def extract_genres_advanced(self):
-        """Extract genres from ipc-chip__text spans"""
         try:
             genres = []
             
-       
             try:
                 genre_spans = self.driver.find_elements(By.CSS_SELECTOR, 'span.ipc-chip__text')
                 for span in genre_spans:
@@ -61,7 +56,6 @@ class IMDbGenreFinder:
             except Exception as e:
                 logger.info(f"ipc-chip__text method failed: {e}")
             
-        
             if not genres:
                 try:
                     genre_links = self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="genres="], a[href*="/search/title/?genres="]')
@@ -80,7 +74,6 @@ class IMDbGenreFinder:
             return []
 
     def get_movie_urls_from_category(self, category_url, max_movies=100):
-        """Get movie URLs from a specific category - INCREASED LIMIT"""
         if not self.driver:
             self.setup_driver()
             
@@ -90,29 +83,27 @@ class IMDbGenreFinder:
             self.driver.get(category_url)
             time.sleep(3)
             
-     
             WebDriverWait(self.driver, 15).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
             
             movie_urls = []
             
-
             selectors_to_try = [
-                'a[href*="/title/tt"][href*="/?ref_=tt_ov_inf"]',  
-                'a[href*="/title/tt"][href*="/?ref_=adv_li_tt"]',  
-                'a[href*="/title/tt"][href*="/?ref_=tt_sims_tt"]',  
-                'a.ipc-poster-card__title',  
-                'h3.ipc-title__text a',  
-                '.lister-item-header a',  
-                '.titleColumn a',  
-                'a[href*="/title/tt"]'  
+                'a[href*="/title/tt"][href*="/?ref_=tt_ov_inf"]',
+                'a[href*="/title/tt"][href*="/?ref_=adv_li_tt"]',
+                'a[href*="/title/tt"][href*="/?ref_=tt_sims_tt"]',
+                'a.ipc-poster-card__title',
+                'h3.ipc-title__text a',
+                '.lister-item-header a',
+                '.titleColumn a',
+                'a[href*="/title/tt"]'
             ]
             
             for selector in selectors_to_try:
                 try:
                     movie_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    logger.info(f"🔍 Selector '{selector}' found {len(movie_elements)} elements")
+                    logger.info(f"Selector '{selector}' found {len(movie_elements)} elements")
                     
                     for element in movie_elements:
                         if len(movie_urls) >= max_movies:
@@ -120,8 +111,7 @@ class IMDbGenreFinder:
                             
                         href = element.get_attribute('href')
                         if href and '/title/tt' in href:
-                            
-                            clean_url = href.split('?')[0]  
+                            clean_url = href.split('?')[0]
                             if clean_url.endswith('/') and clean_url not in movie_urls:
                                 movie_urls.append(clean_url)
                     
@@ -132,9 +122,8 @@ class IMDbGenreFinder:
                     logger.info(f"Selector '{selector}' failed: {e}")
                     continue
             
-           
             if not movie_urls:
-                logger.info("🔄 Trying generic movie discovery...")
+                logger.info("Trying generic movie discovery...")
                 all_links = self.driver.find_elements(By.TAG_NAME, 'a')
                 for link in all_links:
                     if len(movie_urls) >= max_movies:
@@ -145,7 +134,7 @@ class IMDbGenreFinder:
                         if clean_url.endswith('/') and clean_url not in movie_urls:
                             movie_urls.append(clean_url)
             
-            logger.info(f"📋 Found {len(movie_urls)} movies in category")
+            logger.info(f"Found {len(movie_urls)} movies in category")
             return movie_urls[:max_movies]
             
         except Exception as e:
@@ -153,7 +142,6 @@ class IMDbGenreFinder:
             return []
 
     def get_all_category_urls(self):
-        """Get URLs for all movie categories - EXPANDED LIST"""
         categories = {
             "Popular Movies": "https://www.imdb.com/chart/moviemeter/",
             "Top Rated Movies": "https://www.imdb.com/chart/top/",
@@ -172,7 +160,6 @@ class IMDbGenreFinder:
             "Romance": "https://www.imdb.com/search/title/?genres=romance&title_type=feature",
             "Sci-Fi": "https://www.imdb.com/search/title/?genres=sci-fi&title_type=feature",
             "Thriller": "https://www.imdb.com/search/title/?genres=thriller&title_type=feature",
-         
             "Family": "https://www.imdb.com/search/title/?genres=family&title_type=feature",
             "History": "https://www.imdb.com/search/title/?genres=history&title_type=feature",
             "Music": "https://www.imdb.com/search/title/?genres=music&title_type=feature",
@@ -184,7 +171,6 @@ class IMDbGenreFinder:
         return categories
 
     def get_movie_data_fast(self, movie_url):
-        """Fast movie data extraction - focused on essential fields"""
         if not self.driver:
             self.setup_driver()
             
@@ -196,7 +182,7 @@ class IMDbGenreFinder:
         
         try:
             self.driver.get(movie_url)
-            time.sleep(2) 
+            time.sleep(2)
             
             try:
                 WebDriverWait(self.driver, 10).until(
@@ -205,7 +191,6 @@ class IMDbGenreFinder:
             except:
                 logger.warning(f"Page may not have loaded properly for {movie_url}")
             
-           
             movie_data = {
                 'index': self.movies_scraped + 1,
                 'title': self.extract_title(),
@@ -217,7 +202,7 @@ class IMDbGenreFinder:
                 'runtime': self.extract_runtime(),
                 'overview': self.extract_overview(),
                 'director': self.extract_director(),
-                'cast': self.extract_cast()[:5], 
+                'cast': self.extract_cast()[:5],
                 'budget': self.extract_budget(),
                 'revenue': self.extract_revenue(),
                 'original_language': self.extract_original_language(),
@@ -238,16 +223,10 @@ class IMDbGenreFinder:
             return None
 
     def extract_all_fields(self, imdb_id, movie_url):
-        """Extract all fields - comprehensive version"""
         movie_data = {'index': self.movies_scraped + 1}
         
-        
         movie_data['title'] = self.extract_title()
-        
-   
         movie_data['genres'] = self.extract_genres_advanced()
-        
-        
         movie_data['budget'] = self.extract_budget()
         movie_data['homepage'] = self.extract_homepage()
         movie_data['id'] = imdb_id
@@ -275,7 +254,6 @@ class IMDbGenreFinder:
         return movie_data
 
     def extract_imdb_id(self, url):
-        """Extract IMDb ID from URL"""
         match = re.search(r'/title/(tt\d+)', url)
         return match.group(1) if match else None
 
@@ -295,7 +273,6 @@ class IMDbGenreFinder:
             return ""
 
     def extract_director(self):
-        """Extract director using JavaScript"""
         try:
             script = """
             var directors = [];
@@ -317,7 +294,6 @@ class IMDbGenreFinder:
         except:
             return []
 
-   
     def extract_budget(self):
         try:
             budget_selectors = [
@@ -701,7 +677,6 @@ class IMDbGenreFinder:
         return total
 
     def scrape_massive_movie_collection(self, movies_per_category=50, max_total_movies=1000):
-        """MASSIVE scraping - get ALL the movies!"""
         all_movies_data = []
         all_movie_urls = set()
         
@@ -728,20 +703,16 @@ class IMDbGenreFinder:
                 if movie_url not in all_movie_urls:
                     all_movie_urls.add(movie_url)
                     
-                   
                     movie_data = self.get_movie_data_fast(movie_url)
                     if movie_data:
                         movie_data['category_name'] = category_name
                         all_movies_data.append(movie_data)
                         
-                     
                         if len(all_movies_data) % 10 == 0:
                             logger.info(f"PROGRESS: {len(all_movies_data)}/{max_total_movies} movies collected")
                     
-
                     time.sleep(1)
                     
-                 
                     if len(all_movies_data) % 20 == 0:
                         self.save_progress(all_movies_data)
         
@@ -750,8 +721,8 @@ class IMDbGenreFinder:
     def save_progress(self, movies_data):
         if movies_data:
             df = pd.DataFrame(movies_data)
-            os.makedirs('data', exist_ok=True)  
-            df.to_csv('data/imdb_movies.csv', index=False) 
+            os.makedirs('data', exist_ok=True)
+            df.to_csv('data/imdb_movies.csv', index=False)
             logger.info(f"PROGRESS SAVED: {len(movies_data)} movies")
 
     def save_final_data(self, movies_data):
@@ -759,7 +730,6 @@ class IMDbGenreFinder:
             df = pd.DataFrame(movies_data)
             os.makedirs('data', exist_ok=True)
             
-         
             required_fields = [
                 'index', 'title', 'genres', 'id', 'release_date', 'vote_average', 
                 'vote_count', 'runtime', 'overview', 'director', 'cast', 'budget',
@@ -771,24 +741,23 @@ class IMDbGenreFinder:
                     df[field] = ""
             
             df = df[required_fields]
-            df.to_csv('data/imdb_movies.csv', index=False)  
+            df.to_csv('data/imdb_movies.csv', index=False)
             logger.info(f"COMPLETE: Saved {len(movies_data)} movies to data/imdb_movies.csv")
             
-            print("\n📊 MASSIVE DATA COLLECTION SUMMARY:")
-            print(f"🎬 TOTAL MOVIES: {len(movies_data)}")
-            print(f"📈 GENRES COLLECTED: Sample - {movies_data[0]['genres'] if movies_data else 'None'}")
-            print(f"💾 SAVED TO: imdb_movies_MASSIVE_final.csv")
+            print("MASSIVE DATA COLLECTION SUMMARY:")
+            print(f"TOTAL MOVIES: {len(movies_data)}")
+            print(f"GENRES COLLECTED: Sample - {movies_data[0]['genres'] if movies_data else 'None'}")
+            print(f"SAVED TO: imdb_movies_MASSIVE_final.csv")
 
 def main():
     scraper = IMDbGenreFinder()
     
     try:
-        logger.info("🚀 STARTING MASSIVE IMDb SCRAPER - 1000 MOVIES TARGET!")
-        
+        logger.info("STARTING MASSIVE IMDb SCRAPER - 1000 MOVIES TARGET!")
         
         all_movies_data = scraper.scrape_massive_movie_collection(
-            movies_per_category=60,  
-            max_total_movies=1000      
+            movies_per_category=60,
+            max_total_movies=1000
         )
         
         if all_movies_data:
@@ -805,4 +774,4 @@ def main():
         scraper.close_driver()
 
 if __name__ == "__main__":
-    main() 
+    main()
