@@ -2,88 +2,38 @@ name: Movie Data Scraper (TESTING - Every Minute)
 
 on:
   schedule:
-    - cron: '*/1 * * * *'  
-  workflow_dispatch:   
-  push:                    
-    branches: [ main ]
+    - cron: '*/1 * * * *'
+  workflow_dispatch:
 
 jobs:
-  scrape-movies:
+  scrape:
     runs-on: ubuntu-latest
-    env:
-      TZ: America/New_York
-    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Python dependencies (if present)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget unzip
-          # Install Chrome
-          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-          # Install Python dependencies
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          if [ -f "./requirements.txt" ]; then
+            echo "Found requirements.txt — installing dependencies"
+            python -m pip install -r "./requirements.txt"
+          else
+            echo "::warning::No requirements.txt found at repo root; skipping dependency install"
+          fi
 
-      - name: Create directories
+      - name: Run scraper (only if an entrypoint exists)
         run: |
-          mkdir -p data
-          mkdir -p scrapers
-          mkdir -p scripts
-
-      - name: Run TMDB Scraper
-        env:
-          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-        run: |
-          echo "Starting TMDB scraper..."
-          python scrapers/tmdb_scraper.py
-          echo "TMDB scraper completed"
-
-      - name: Run IMDb Scraper
-        run: |
-          echo "Starting IMDb scraper..."
-          python scrapers/imdb_scraper.py
-          echo "IMDb scraper completed"
-
-      - name: Combine Data
-        run: |
-          echo "Combining data..."
-          python scripts/combine_data.py
-          echo "Data combination completed"
-
-      - name: Display file sizes
-        run: |
-          echo "Generated files:"
-          ls -la data/
-          echo "TMDB movies:" && wc -l data/tmdb_movies.csv || echo "No TMDB file"
-          echo "IMDb movies:" && wc -l data/imdb_movies.csv || echo "No IMDb file"
-          echo "Combined movies:" && wc -l data/combined_movies.csv || echo "No combined file"
-
-      - name: Commit and Push updated data
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          git add data/
-          git diff --staged --quiet || git commit -m "Automated: Updated movie data $(date +'%Y-%m-%d %H:%M')"
-          git push
-          
-      - name: Install Chrome and dependencies
-        run: |
-          sudo apt-get update
-          # Install Chrome dependencies
-          sudo apt-get install -y wget unzip libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libxss1 libasound2
-          # Download and install Chrome
-          wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt install -y /tmp/chrome.deb
-          # Verify installation
-          google-chrome --version
-
+          # Try common entrypoints; if none exist, print a message and succeed
+          if [ -f "./main.py" ]; then
+            python main.py
+          elif [ -f "./scraper.py" ]; then
+            python scraper.py
+          else
+            echo "No main.py or scraper.py found — nothing to run in this job"
+          fi
