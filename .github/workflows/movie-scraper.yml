@@ -1,0 +1,49 @@
+name: Movie Data Scraper (Daily)
+
+on:
+  schedule:
+    - cron: '0 12 * * *'  
+  workflow_dispatch:       
+
+jobs:
+  scrape-movies:
+    runs-on: ubuntu-latest
+    env:
+      TZ: America/New_York
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+          pip install -r requirements.txt
+
+      - name: Run TMDB Scraper
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: |
+          python scrapers/tmdb_scraper.py
+
+      - name: Run IMDb Scraper
+        run: |
+          python scrapers/imdb_scraper.py
+
+      - name: Combine Data
+        run: |
+          python scripts/combine_data.py
+
+      - name: Commit and Push updated data
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add data/
+          git commit -m "Automated: Updated movie data $(date +'%Y-%m-%d %H:%M')" || echo "No changes to commit"
+          git push
