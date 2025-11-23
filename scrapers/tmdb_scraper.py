@@ -13,6 +13,8 @@ import re
 import os
 import json
 from typing import List, Dict
+import glob
+import stat
 
 class TMDBSuccessfulScraper:
     def __init__(self, api_key: str, headless: bool = False):
@@ -21,21 +23,95 @@ class TMDBSuccessfulScraper:
         self.api_base_url = "https://api.themoviedb.org/3"
         self.setup_driver(headless)
     
+    def _is_binary_executable(self, path: str) -> bool:
+        """Return True if path is an executable binary (executable bit or ELF header)."""
+        try:
+            if not os.path.isfile(path):
+                return False
+            if os.access(path, os.X_OK):
+                return True
+            with open(path, 'rb') as fh:
+                header = fh.read(4)
+                return header == b'\x7fELF'
+        except Exception:
+            return False
+
+    def _resolve_chromedriver_executable(self, installed_path: str) -> str:
+        """
+        Ensure installed_path points to an executable chromedriver binary.
+        If not, search the same directory (and subdirs) for the real executable,
+        set chmod +x and return it.
+        """
+        try:
+            # If the path returned is already an executable binary, use it
+            if self._is_binary_executable(installed_path):
+                return installed_path
+        except Exception:
+            pass
+
+        driver_dir = os.path.dirname(installed_path) or installed_path
+
+        # First pass: candidates in same dir
+        candidates = []
+        try:
+            for p in glob.glob(os.path.join(driver_dir, '*')):
+                name = os.path.basename(p).lower()
+                if 'chromedriver' in name:
+                    candidates.append(p)
+        except Exception:
+            candidates = []
+
+        # Check candidates for executable/ELF
+        for cand in sorted(candidates):
+            if self._is_binary_executable(cand):
+                try:
+                    os.chmod(cand, 0o755)
+                except Exception:
+                    pass
+                return cand
+
+        # Second pass: walk subdirectories looking for chromedriver file
+        for root, _, files in os.walk(driver_dir):
+            for f in files:
+                if 'chromedriver' in f.lower():
+                    p = os.path.join(root, f)
+                    if self._is_binary_executable(p):
+                        try:
+                            os.chmod(p, 0o755)
+                        except Exception:
+                            pass
+                        return p
+
+        # Nothing found - return original so the error is visible
+        return installed_path
+
     def setup_driver(self, headless: bool = False):
         """Setup Chrome driver with options"""
         chrome_options = Options()
         if headless:
-            chrome_options.add_argument("--headless")
+            # use modern headless flag
+            chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        chrome_options.add_argument("--disable-gpu")
         
-        service = Service(ChromeDriverManager().install())
+        # Install and resolve the correct chromedriver executable
+        installed = ChromeDriverManager().install()
+        resolved = self._resolve_chromedriver_executable(installed)
+        print(f"ChromeDriverManager.install() returned: {installed}")
+        print(f"Using chromedriver executable: {resolved}")
+
+        service = Service(resolved)
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        # mask webdriver
+        try:
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        except Exception:
+            pass
         self.wait = WebDriverWait(self.driver, 15)
     
     def get_all_movies_via_pagination(self, category: str, max_pages: int = 20) -> List[str]:
@@ -43,7 +119,6 @@ class TMDBSuccessfulScraper:
         movie_links = set()
         
         print(f"Getting ALL movies from {category} via pagination")
-        
         
         url_patterns = {
             "popular": f"{self.base_url}/movie?page={{}}",
@@ -62,18 +137,15 @@ class TMDBSuccessfulScraper:
                 self.driver.get(url)
                 time.sleep(3)
                 
-
                 current_url = self.driver.current_url
                 if "404" in current_url or "error" in current_url.lower():
                     print(f"Page {page} not found - stopping")
                     break
                 
-                
                 links = self._collect_movie_links()
                 if not links:
                     print(f"No movies found on page {page} - stopping")
                     break
-                
                 
                 previous_count = len(movie_links)
                 movie_links.update(links)
@@ -85,7 +157,6 @@ class TMDBSuccessfulScraper:
                 
                 print(f"Page {page}: +{new_movies} new movies, total: {len(movie_links)}")
                 
-               
                 if new_movies < 5 and page > 3:
                     print(f"Few new movies ({new_movies}) - likely reached end")
                     break
@@ -102,7 +173,6 @@ class TMDBSuccessfulScraper:
         movie_links = set()
         
         try:
-         
             movie_elements = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/movie/']")
             
             for element in movie_elements:
@@ -123,11 +193,9 @@ class TMDBSuccessfulScraper:
         if not href:
             return False
         
-        
         if any(x in href for x in ['/cast', '/crew', '/trailers', '/images', '/videos', '/reviews']):
             return False
         
-       
         movie_id_match = re.search(r'/movie/(\d+)-', href)
         if not movie_id_match:
             return False
@@ -158,7 +226,6 @@ class TMDBSuccessfulScraper:
             if response.status_code == 200:
                 movie_data = response.json()
                 
-               
                 complete_data = {
                     'index': movie_data.get('id'),
                     'budget': movie_data.get('budget'),
@@ -183,16 +250,13 @@ class TMDBSuccessfulScraper:
                     'vote_count': movie_data.get('vote_count')
                 }
                 
-            
                 credits = movie_data.get('credits', {})
                 cast = credits.get('cast', [])
                 complete_data['cast'] = [f"{actor['name']} as {actor.get('character', 'N/A')}" for actor in cast[:15]]
                 
-          
                 crew = credits.get('crew', [])
                 directors = [person for person in crew if person.get("job") == "Director"]
                 complete_data['director'] = [director["name"] for director in directors]
-                
                 
                 important_crew = []
                 for person in crew:
@@ -230,7 +294,6 @@ class TMDBSuccessfulScraper:
             print(f"PAGINATION - {category_name.upper()}")
             print(f"{'='*60}")
             
-            
             movie_links = self.get_all_movies_via_pagination(category_key, pages_per_category)
             print(f"Found {len(movie_links)} movie links in {category_name}")
             
@@ -253,13 +316,15 @@ class TMDBSuccessfulScraper:
                 else:
                     print(f"     Invalid movie URL")
                 
-                
                 if i % 10 == 0:
                     time.sleep(1)
             
             print(f"Successfully processed {successful_count}/{len(movie_links)} movies from {category_name}")
         
-        self.driver.quit()
+        try:
+            self.driver.quit()
+        except Exception:
+            pass
         
         if all_movies_data:
             df = pd.DataFrame(all_movies_data)
@@ -279,17 +344,18 @@ def main():
     print("Expected: 200-1000+ movies across all categories")
     print("This will get you ALL the movies...")
     
-    scraper = TMDBSuccessfulScraper(api_key=API_KEY, headless=False)
+    # if running on CI, set headless True via env var CI or HEADLESS
+    headless_env = os.getenv('HEADLESS')
+    ci_env = os.getenv('CI')
+    headless_flag = True if headless_env == '1' or headless_env == 'true' or ci_env else False
+
+    scraper = TMDBSuccessfulScraper(api_key=API_KEY, headless=headless_flag)
     
     start_time = time.time()
-    
-
     df = scraper.scrape_all_categories_complete(pages_per_category=20)
-    
     end_time = time.time()
     execution_time = end_time - start_time
     execution_minutes = execution_time / 60
-    
     
     if not df.empty:
         output_file = "data/tmdb_movies.csv"  
@@ -303,12 +369,10 @@ def main():
         print(f"Execution time: {execution_minutes:.2f} minutes")
         print(f"Data saved to: {output_file}")
         
-      
         print(f"\nCATEGORY BREAKDOWN:")
         for category in df['category'].unique():
             count = len(df[df['category'] == category])
             print(f"   {category}: {count} movies")
-        
         
         print(f"\nCOMPLETE DATA QUALITY:")
         fields_to_check = [
@@ -324,7 +388,6 @@ def main():
                     count = df[field].apply(lambda x: x not in ['N/A', None, ''] and x != 0).sum()
                 print(f"   {field.replace('_', ' ').title()}: {count}/{len(df)} movies")
         
-    
         print("-" * 100)
         sample = df.head(3)
         for idx, row in sample.iterrows():
