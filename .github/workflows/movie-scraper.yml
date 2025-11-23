@@ -1,9 +1,11 @@
-name: Movie Data Scraper (Daily)
+name: Movie Data Scraper (TESTING - Every Minute)
 
 on:
   schedule:
-    - cron: '0 12 * * *'  
-  workflow_dispatch:       
+    - cron: '*/1 * * * *'  
+  workflow_dispatch:   
+  push:                    
+    branches: [ main ]
 
 jobs:
   scrape-movies:
@@ -26,24 +28,41 @@ jobs:
           sudo apt-get install -y chromium-browser chromium-chromedriver
           pip install -r requirements.txt
 
+      - name: Create data directory
+        run: mkdir -p data
+
       - name: Run TMDB Scraper
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: |
+          echo "Starting TMDB scraper..."
           python scrapers/tmdb_scraper.py
+          echo "TMDB scraper completed"
 
       - name: Run IMDb Scraper
         run: |
+          echo "Starting IMDb scraper..."
           python scrapers/imdb_scraper.py
+          echo "IMDb scraper completed"
 
       - name: Combine Data
         run: |
+          echo "Combining data..."
           python scripts/combine_data.py
+          echo "Data combination completed"
+
+      - name: Display file sizes
+        run: |
+          echo "Generated files:"
+          ls -la data/
+          echo "TMDB movies:" && wc -l data/tmdb_movies.csv || echo "No TMDB file"
+          echo "IMDb movies:" && wc -l data/imdb_movies.csv || echo "No IMDb file"
+          echo "Combined movies:" && wc -l data/combined_movies.csv || echo "No combined file"
 
       - name: Commit and Push updated data
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git add data/
-          git commit -m "Automated: Updated movie data $(date +'%Y-%m-%d %H:%M')" || echo "No changes to commit"
+          git diff --staged --quiet || git commit -m "Automated: Updated movie data $(date +'%Y-%m-%d %H:%M')"
           git push
